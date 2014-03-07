@@ -1,7 +1,7 @@
 import requests
 import os
 import json
-from urllib.parse import urlparse as urlparse
+from urlparse import urlparse
 
 
 class AuthenticationError(Exception):
@@ -14,6 +14,15 @@ class AuthenticationError(Exception):
 
 
 class SimulationError(Exception):
+
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return (self.value)
+
+
+class EntityError(Exception):
 
     def __init__(self, value):
         self.value = value
@@ -59,10 +68,18 @@ class Simulator(object):
             return Simulator.STATUS_RUNNING
 
     def run(self, simulation):
-        # recurse through the model and build the simulation json object
-        entity_dicts = generate_entity_dicts(simulation.model)
+        # if they haven't authenticated throw an error
+        if not self.token:
+            return SimulationError("""Not authenticated, authenticate by
+                                   calling the authenticate() function on this
+                                   object before attempting to run a
+                                   simulation""")
+        # recurse through the top group and build the simulation json object
+        entity_dicts = generate_entity_dicts(simulation.top_group)
         # set the username
         entity_dicts['meta'] = {'username': self.username}
+        # which group is the top-level group
+        entity_dicts['top_group'] = {"group_id": simulation.top_group['_id']}
         # dump the dictionary to a json string
         sim_string = json.dumps(entity_dicts)
         # set the correct url path
@@ -94,154 +111,215 @@ def generate_entity_dicts(self, model):
     # check the current
     if model._id not in entity_dicts['group_list']:
         entity_dicts['group_list'][model['_id']] = model
-    else:
-        raise SimulationError("Recursive groups detected!")
-        return
     # check/add neuron types and channels
     for neuron_group in model.neuron_groups:
         # if the neuron isn't in the neuron list yet
         if neuron_group['neuron']._id not in entity_dicts['neuron_list']:
             # add it to the list
-            entity_dicts['neuron_list'][neuron_group['neuron']._id] = neuron_group['neuron']
+            entity_dicts['neuron_list'][neuron_group['neuron']._id] = \
+                neuron_group['neuron']
             # check all of its channels
             for channel in neuron_group['neuron']['channels']:
                 # if the channel isn't in the list, add it
                 if channel._id not in entity_dicts['channel_list']:
                     entity_dicts['channel_list'][channel._id] = channel
     for alias in model.neuron_aliases:
-        # TODO
-        pass
-
+        new_alias = alias.copy()
+        new_alias['group_id'] = model._id
+        # if the alias was already created, we have an error
+        if new_alias['alias'] in entity_dicts['neuron_alias_list']:
+            raise SimulationError("neuron alias already exists")
+        # add it to the dicts
+        else:
+            entity_dicts['neuron_alias_list'][new_alias['alias']] = new_alias
+    for alias in model.synapse_aliases:
+        new_alias = alias.copy()
+        new_alias['group_id'] = model._id
+        # if the alias was already created, we have an error
+        if new_alias['alias'] in entity_dicts['synapse_alias_list']:
+            raise SimulationError("synapse alias already exists")
+        # add it to the dicts
+        else:
+            entity_dicts['neuron_alias_list'][new_alias['alias']] = new_alias
     # recursively traverse the subgroups of the model
     for subgroup in model.subgroups:
-        subgroup_result_list.append(generate_entity_dicts(subgroup))
+        # call this function on the current subgroup and get the dict back
+        res = subgroup_result_list.append(generate_entity_dicts(subgroup))
+    # look at all the submodels resulting dictionaries
+    for res in subgroup_result_list:
+        # loop over the entity categories from the result (eg. neuron_dict)
+        for entity_category, entity_category_dict in res:
+            # loop over the entities created in that category
+            for entity_id, entity_value in entity_category_dict:
+                # add the new entities to their corresponding dictionary
+                entity_dicts[entity_category][entity_id] = entity_value
+    # return the resulting entity dictionary
+    return entity_dicts
 
 
 class Simulation(object):
 
-    def __init__(self, model):
-        self.model = model
+    def __init__(self, top_group, stimuli, reports):
+        self.top_group = top_group
+        self.stimuli = stimuli
+        self.reports = reports
 
 
-class Entity(object):
+class _Entity(object):
 
-    STIMULUS = 'STIMULUS'
-    GROUP = 'GROUP'
-    CHANNEL = 'CHANNEL'
-    REPORT = 'REPORT'
-    SYNAPSE = 'SYNAPSE'
-    NEURON = 'NEURON'
+    STIMULUS = 'stimulus'
+    GROUP = 'group'
+    CHANNEL = 'channel'
+    REPORT = 'report'
+    SYNAPSE = 'synapse'
+    NEURON = 'neuron'
 
-    def __init__(self, _id, entity_type, entity_name, description, author,
-                 author_email):
-        self.parameter_list = [
+    def __init__(self, kwargs):
+        self.metadata = [
             '_id',
             'entity_type',
             'description',
             'author',
             'author_email'
         ]
-        if not _id:
+        for param, value in kwargs.iteritems():
+            setattr(self, param, kwargs[param])
+        if '_id' not in kwargs:
             # this should have significant enough entropy to not cause
-            # collisions within the next 3 billion years or so
+            # collisions within the next 40 years or so
             self._id = os.urandom(32).encode('hex')
-        else:
-            self._id = _id
-        self.entity_type = entity_type
-        self.description = description
-        self.author = author
-        self.author_email = author_email
+        # Lock the parameter and metadata lists from changing at runtime
+        self.locked = True
 
     def __setattr__(self, key, value):
         """ This ensures that the correct parameters are being set on the
         entities to prevent bugs, etc. """
+        # if we're locking the entity, do it
+        if key is 'locked':
+            self.__dict__[key] = value
+            return
+        # if we're setting either of these lists, its okay if its not locked
+        if (key is 'parameter_list' or key is 'metadata'
+                and 'locked' not in self.__dict__):
+            # set the value
+            self.__dict__[key] = value
+            return
         # if the key isn't in the parameter list, throw an error
-        if key not in self.parameter_list:
+        if key not in self.parameter_list and key not in self.metadata:
             # list acceptable parameters for this entity
-            raise TypeError("""cannot assign this attribute, acceptable
-                            attributes include %s""" % self.parameter_list)
+            raise TypeError("""cannot assign this attribute, acceptable \
+                            attributes include %s or %s"""
+                            % (self.parameter_list, self.metadata))
+        else:
+            self.__dict__[key] = value
 
-    def to_dict():
-        return {}
+    def to_dict(self):
+        # create the dictionary object
+        dictionary = {'parameters': {}}
+        # create the metadata parameters
+        for param in self.metadata:
+            try:
+                dictionary[param] = getattr(self, param)
+            except AttributeError:
+                continue
+        # add the entity-specific parameters to the parameters property
+        for param in self.parameter_list:
+            try:
+                dictionary['parameters'][param] = getattr(self, param)
+            except AttributeError:
+                continue
+        return dictionary
 
 
-class Normal(Entity):
-    ''' Class for a normal distribution of a parameter '''
+class Normal(object):
+    """ Class for a normal distribution of a parameter """
 
     def __init__(self, mean, stdev):
         self.mean = mean
         self.stdev = stdev
 
+    def to_dict(self):
+        return {'mean': self.mean, 'stdev': self.stdev}
 
-class Uniform(Entity):
-    ''' Class for a uniform distribution of a parameter '''
+
+class Uniform(object):
+    """ Class for a uniform distribution of a parameter """
 
     def __init__(self, min, max):
         self.min = min
         self.max = max
 
-
-class Channel(Entity):
-
-    LIF_VOLTAGE_GATED = 'LIF_VOLTAGE_GATED'
-    LIF_CALCIUM_DEPENDENT = 'LIF_CALCIUM_DEPENDENT'
-    HH_VOLTAGE_GATED = 'HH_VOLTAGE_GATED'
-
-    def __init__(self, channel_type):
-        Entity.__init__(self, entity_type=Entity.CHANNEL)
-        self.channel_type = channel_type
+    def to_dict(self):
+        return {'min': self.min, 'max': self.max}
 
 
-class LIFVoltageGatedChannel(Channel):
+class _Channel(_Entity):
 
-    def __init__(self, m_initial, reversal_potential, conductance, v_half, r,
-                 activation_slope, deactivation_slope, equilibrium_slope):
-        Channel.__init__(self, channel_type=Channel.LIF_VOLTAGE_GATED)
-        self.m_initial = m_initial
-        self.reversal_potential = reversal_potential
-        self.conductance = conductance
-        self.v_half = v_half
-        self.r = r
-        self.activation_slope = activation_slope
-        self.deactivation_slope = deactivation_slope
-        self.equilibrium_slope = equilibrium_slope
+    LIF_VOLTAGE_GATED = 'lif_voltage_gated'
+    LIF_CALCIUM_DEPENDENT = 'lif_calcium_dependent'
+    HH_VOLTAGE_GATED = 'hh_voltage_gated'
+
+    def __init__(self, kwargs):
+        kwargs['entity_type'] = _Entity.CHANNEL
+        self.parameter_list += ['channel_type']
+        _Entity.__init__(self, kwargs)
 
 
-class LIFCalciumDependentChannel(Channel):
+class LIFVoltageGatedChannel(_Channel):
 
-    def __init__(self, m_initial, reversal_potential, conductance,
-                 backwards_rate, forward_scale, forward_exponent, tau_scale):
-        Channel.__init__(self, channel_type=Channel.LIF_CALCIUM_DEPENDENT)
-        self.m_initial = m_initial
-        self.reversal_potential = reversal_potential
-        self.conductance = conductance
-        self.backwards_rate = backwards_rate
-        self.forward_scale = forward_scale
-        self.forward_exponent = forward_exponent
-        self.tau_scale = tau_scale
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            'v_half',
+            'r',
+            'activation_slope',
+            'deactivation_slope',
+            'equilibrium_slope',
+            'conductance',
+            'reversal_potential',
+            'm_initial',
+            'm_power'
+        ]
+        kwargs['channel_type'] = _Channel.LIF_VOLTAGE_GATED
+        _Channel.__init__(self, kwargs)
 
 
-class HHVoltageGatedChannel(Channel):
+class LIFCalciumDependentChannel(_Channel):
+
+    def __init__(self, **kwargs):
+        self.parameter_list += [
+            'm_initial',
+            'reversal_potential',
+            'conductance',
+            'backwards_rate',
+            'forward_scale',
+            'forward_exponent',
+            'backwards_rate',
+            'tau_scale'
+        ]
+        _Channel.__init__(self, kwargs)
+
+
+class HHVoltageGatedChannel(_Channel):
 
     def __init__(self):
         # TODO: Write this!
         pass
 
 
-class Synapse(Entity):
+class _Synapse(_Entity):
 
-    FLAT = 'FLAT'
-    NCS = 'NCS'
+    FLAT = 'flat'
+    NCS = 'ncs'
 
-    def __init__(self, synapse_type):
-        Entity.__init__(self, entity_type=Entity.SYNAPSE)
+    def __init__(self, synapse_type, parameter_list):
+        _Entity.__init__(self, entity_type=_Entity.SYNAPSE)
         self.synapse_type = synapse_type
 
 
-class FlatSynapse(Synapse):
+class FlatSynapse(_Synapse):
 
     def __init__(self, delay, current):
-        Synapse.__init__(self, synapse_type=Synapse.FLAT)
+        _Synapse.__init__(self, synapse_type=_Synapse.FLAT)
         self.parameter_list += [
             'delay',
             'current'
@@ -250,14 +328,31 @@ class FlatSynapse(Synapse):
         self.current = current
 
 
-class NCSSynapse(Synapse):
+class NCSSynapse(_Synapse):
 
     def __init__(self, utilization, redistribution, last_prefire_time,
                  last_postfire_time, tau_facilitation, tau_depression, tau_ltp,
                  tau_ltd, a_ltp_minimum, a_ltd_minimum, max_conductance,
                  reversal_potential, tau_postsynaptic_conductance,
                  psg_waveform_duration, delay):
-        Synapse.__init__(self, synapse_type=Synapse.NCS)
+        _Synapse.__init__(self, synapse_type=_Synapse.NCS)
+        self.parameter_list += [
+            'utilization',
+            'redistribution',
+            'last_prefire_time',
+            'last_postfire_time',
+            'tau_facilitation',
+            'tau_depression',
+            'tau_ltp',
+            'tau_ltd',
+            'a_ltp_minimum',
+            'a_ltd_minimum',
+            'max_conductance',
+            'reversal_potential',
+            'tau_postsynaptic_conductance',
+            'psg_waveform_duration',
+            'delay'
+        ]
         self.utilization = utilization
         self.redistribution = redistribution
         self.last_prefire_time = last_prefire_time
@@ -275,34 +370,55 @@ class NCSSynapse(Synapse):
         self.delay = delay
 
 
-class Stimulus(Entity):
+class _Stimulus(_Entity):
+
+    RECTANGULAR_CURRENT = 'rectangular_current'
 
     def __init__(self, stimulus_type, time_start, time_end, probability):
-        Entity.__init__(self, entity_type=Entity.STIMULUS)
+        _Entity.__init__(self, entity_type=_Entity.STIMULUS)
+        self.parameter_list += [
+            'time_start',
+            'time_end',
+            'probability'
+        ]
         self.stimulus_type = stimulus_type
         self.time_start = time_start
         self.time_end = time_end
         self.probability = probability
 
 
-class RectangularCurrentStimulus(Stimulus):
+class RectangularCurrentStimulus(_Stimulus):
 
     def __init__(self, amplitude, width, frequency, time_start, time_end,
                  probability):
-        Stimulus.__init__(self, Stimulus.RECTANGULAR_CURRENT, time_start,
-                          time_end, probability)
+        _Stimulus.__init__(self, _Stimulus.RECTANGULAR_CURRENT, time_start,
+                           time_end, probability)
+        self.parameter_list += [
+            'amplitude',
+            'width',
+            'frequency',
+        ]
         self.amplitude = amplitude
         self.width = width
         self.frequency = frequency
 
 
-class Report(Entity):
+class Report(_Entity):
 
-    FILE = 'FILE'
-    SOCKET = 'SOCKET'
+    FILE = 'file'
+    SOCKET = 'socket'
 
     def __init__(self, report_method, report_type, report_target, probability,
                  frequency, time_start, time_end):
+        _Entity.__init__(self, entity_type=_Entity.REPORT)
+        self.parameter_list += [
+            'report_method',
+            'report_type'
+            'report_target',
+            'probability',
+            'time_start',
+            'time_end'
+        ]
         self.report_method = report_method
         self.report_type = report_type
         self.report_target = report_target
@@ -312,21 +428,30 @@ class Report(Entity):
         self.time_end = time_end
 
 
-class Neuron(Entity):
+class _Neuron(_Entity):
 
-    IZH_NEURON = 'IZH_NEURON'
-    NCS_NEURON = 'NCS_NEURON'
-    HH_NEURON = 'HH_NEURON'
+    IZH_NEURON = 'izh_neuron'
+    NCS_NEURON = 'ncs_neuron'
+    HH_NEURON = 'hh_neuron'
 
     def __init__(self, neuron_type):
-        Entity.__init__(self, entity_type=Entity.NEURON)
+        _Entity.__init__(self, entity_type=_Entity.NEURON)
         self.neuron_type = neuron_type
 
 
-class IzhNeuron(Neuron):
+class IzhNeuron(_Neuron):
 
     def __init__(self, a, b, c, d, u, v, threshold):
-        Neuron.__init__(self, Neuron.IZH_NEURON)
+        _Neuron.__init__(self, _Neuron.IZH_NEURON)
+        self.parameter_list += [
+            'a',
+            'b',
+            'c',
+            'd',
+            'u',
+            'v',
+            'threshold'
+        ]
         self.a = a
         self.b = b
         self.c = c
@@ -336,13 +461,26 @@ class IzhNeuron(Neuron):
         self.threshold = threshold
 
 
-class NCSNeuron(Neuron):
+class NCSNeuron(_Neuron):
 
     def __init__(self, threshold, spikeshape, resting_potential, calcium,
                  calcium_spike_increment, tau_calcium,
                  leak_reversal_potential, leak_conductance, tau_membrane,
                  r_membrane, channels):
-        Neuron.__init__(self, Neuron.NCS_NEURON)
+        _Neuron.__init__(self, _Neuron.NCS_NEURON)
+        self.parameter_list += [
+            'threshold',
+            'spikeshape',
+            'resting_potential',
+            'calcium',
+            'calcium_spike_increment',
+            'tau_calcium',
+            'leak_reversal_potential',
+            'leak_conductance',
+            'tau_membrane',
+            'r_membrane',
+            'channels'
+        ]
         self.threshold = threshold
         self.spikeshape = spikeshape
         self.resting_potential = resting_potential
@@ -356,30 +494,31 @@ class NCSNeuron(Neuron):
         self.channels = channels
 
 
-class HHNeuron(Neuron):
+class HHNeuron(_Neuron):
 
     def __init__(self, resting_potential, threshold, capacitance, channels):
-        Neuron.__init__(self, Neuron.HH_NEURON)
+        _Neuron.__init__(self, _Neuron.HH_NEURON)
+        self.parameter_list += [
+            'resting_potential',
+            'threshold',
+            'capacitance',
+            'channels'
+        ]
         self.resting_potential = resting_potential
         self.threshold = threshold
         self.capacitance = capacitance
         self.channels = channels
 
 
-class GroupType(Entity):
+class Group(_Entity):
 
-    def __init__(self, geometry, subgroups, neuron_groups, neuron_aliases,
-                 synaptic_aliases, connections):
-        Entity.__init__(self, entity_type=Entity.GROUP)
-        self.geometry = geometry
-        self.subgroups = subgroups
-        self.neuron_groups = neuron_groups
-        self.neuron_aliases = neuron_aliases
-        self.synaptic_aliases = synaptic_aliases
-        self.connections = connections
-
-
-class GroupInstance(object):
-
-    def __init__(self, group_type):
-        pass
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            'geometry',
+            'subgroups',
+            'neuron_groups',
+            'neuron_aliases',
+            'synaptic_aliases',
+            'connections'
+        ]
+        _Entity.__init__(self, kwargs)
