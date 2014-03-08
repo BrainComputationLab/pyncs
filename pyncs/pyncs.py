@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+import textwrap
 from urlparse import urlparse
 
 
@@ -176,11 +177,11 @@ class _Entity(object):
 
     def __init__(self, kwargs):
         self.metadata = [
-            '_id',
-            'entity_type',
-            'description',
-            'author',
-            'author_email'
+            ('_id', [str]),
+            ('entity_type', [str]),
+            ('description', [str]),
+            ('author', [str]),
+            ('author_email', [str])
         ]
         for param, value in kwargs.iteritems():
             setattr(self, param, kwargs[param])
@@ -204,28 +205,54 @@ class _Entity(object):
             # set the value
             self.__dict__[key] = value
             return
-        # if the key isn't in the parameter list, throw an error
-        if key not in self.parameter_list and key not in self.metadata:
+        # strip the types out for name checking
+        params = map(lambda x: x[0], self.parameter_list)
+        meta = map(lambda x: x[0], self.metadata)
+        # if the key isn't in the parameter list/meta list, throw an error
+        if key not in params and key not in meta:
+            # Generate parameter list
+            l = params + meta
             # list acceptable parameters for this entity
-            raise TypeError("""cannot assign this attribute, acceptable \
-                            attributes include %s or %s"""
-                            % (self.parameter_list, self.metadata))
-        else:
-            self.__dict__[key] = value
+            raise TypeError(textwrap.dedent(
+                "cannot assign attribute %s, "
+                "acceptable attributes include %s" % (key, l))
+            )
+        # TODO This is a dumb way of doing this, need to reconsider
+        # Check for type accuracy
+        for param in self.parameter_list:
+            # find the parameter in the list
+            if param[0] is key:
+                # if the specified type isn't allowed, throw an exception
+                if type(value) not in param[1]:
+                    raise TypeError(textwrap.dedent(
+                        "invalid type of attribute %s (%s), acceptable "
+                        "types include %s" % (key, type(value), param[1]))
+                    )
+                # otherwise we're done here
+                else:
+                    break
+        self.__dict__[key] = value
 
     def to_dict(self):
         # create the dictionary object
         dictionary = {'parameters': {}}
+        params = map(lambda x: x[0], self.parameter_list)
+        meta = map(lambda x: x[0], self.metadata)
         # create the metadata parameters
-        for param in self.metadata:
+        for param in meta:
             try:
-                dictionary[param] = getattr(self, param)
+                attr = getattr(self, param)
+                dictionary[param] = attr
             except AttributeError:
                 continue
         # add the entity-specific parameters to the parameters property
-        for param in self.parameter_list:
+        for param in params:
             try:
-                dictionary['parameters'][param] = getattr(self, param)
+                attr = getattr(self, param)
+                if type(attr) in [Normal, Uniform]:
+                    dictionary['parameters'][param] = attr.to_dict()
+                else:
+                    dictionary['parameters'][param] = attr
             except AttributeError:
                 continue
         return dictionary
@@ -260,8 +287,8 @@ class _Channel(_Entity):
     HH_VOLTAGE_GATED = 'hh_voltage_gated'
 
     def __init__(self, kwargs):
+        self.parameter_list += [('channel_type', [str])]
         kwargs['entity_type'] = _Entity.CHANNEL
-        self.parameter_list += ['channel_type']
         _Entity.__init__(self, kwargs)
 
 
@@ -269,15 +296,15 @@ class LIFVoltageGatedChannel(_Channel):
 
     def __init__(self, **kwargs):
         self.parameter_list = [
-            'v_half',
-            'r',
-            'activation_slope',
-            'deactivation_slope',
-            'equilibrium_slope',
-            'conductance',
-            'reversal_potential',
-            'm_initial',
-            'm_power'
+            ('v_half', [int, float, Normal, Uniform]),
+            ('r', [int, float, Normal, Uniform]),
+            ('activation_slope', [int, float, Normal, Uniform]),
+            ('deactivation_slope', [int, float, Normal, Uniform]),
+            ('equilibrium_slope', [int, float, Normal, Uniform]),
+            ('conductance', [int, float, Normal, Uniform]),
+            ('reversal_potential', [int, float, Normal, Uniform]),
+            ('m_initial', [int, float, Normal, Uniform]),
+            ('m_power', [int, float, Normal, Uniform])
         ]
         kwargs['channel_type'] = _Channel.LIF_VOLTAGE_GATED
         _Channel.__init__(self, kwargs)
@@ -287,15 +314,16 @@ class LIFCalciumDependentChannel(_Channel):
 
     def __init__(self, **kwargs):
         self.parameter_list += [
-            'm_initial',
-            'reversal_potential',
-            'conductance',
-            'backwards_rate',
-            'forward_scale',
-            'forward_exponent',
-            'backwards_rate',
-            'tau_scale'
+            ('m_initial', [int, float, Normal, Uniform]),
+            ('reversal_potential', [int, float, Normal, Uniform]),
+            ('conductance', [int, float, Normal, Uniform]),
+            ('backwards_rate', [int, float, Normal, Uniform]),
+            ('forward_scale', [int, float, Normal, Uniform]),
+            ('forward_exponent', [int, float, Normal, Uniform]),
+            ('backwards_rate', [int, float, Normal, Uniform]),
+            ('tau_scale', [int, float, Normal, Uniform])
         ]
+        kwargs['channel_type'] = _Channel.LIF_CALCIUM_DEPENDENT
         _Channel.__init__(self, kwargs)
 
 
@@ -303,7 +331,7 @@ class HHVoltageGatedChannel(_Channel):
 
     def __init__(self):
         # TODO: Write this!
-        pass
+        raise NotImplementedError()
 
 
 class _Synapse(_Entity):
@@ -311,96 +339,72 @@ class _Synapse(_Entity):
     FLAT = 'flat'
     NCS = 'ncs'
 
-    def __init__(self, synapse_type, parameter_list):
-        _Entity.__init__(self, entity_type=_Entity.SYNAPSE)
-        self.synapse_type = synapse_type
+    def __init__(self, kwargs):
+        self.parameter_list += [('synapse_type', [str])]
+        kwargs['entity_type'] = _Entity.SYNAPSE
+        _Entity.__init__(self, kwargs)
 
 
 class FlatSynapse(_Synapse):
 
-    def __init__(self, delay, current):
-        _Synapse.__init__(self, synapse_type=_Synapse.FLAT)
-        self.parameter_list += [
-            'delay',
-            'current'
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            ('delay', [int, float, Normal, Uniform]),
+            ('current', [int, float, Normal, Uniform])
         ]
-        self.delay = delay
-        self.current = current
+        kwargs['synapse_type'] = _Synapse.FLAT
+        _Synapse.__init__(self, kwargs)
 
 
 class NCSSynapse(_Synapse):
 
-    def __init__(self, utilization, redistribution, last_prefire_time,
-                 last_postfire_time, tau_facilitation, tau_depression, tau_ltp,
-                 tau_ltd, a_ltp_minimum, a_ltd_minimum, max_conductance,
-                 reversal_potential, tau_postsynaptic_conductance,
-                 psg_waveform_duration, delay):
-        _Synapse.__init__(self, synapse_type=_Synapse.NCS)
-        self.parameter_list += [
-            'utilization',
-            'redistribution',
-            'last_prefire_time',
-            'last_postfire_time',
-            'tau_facilitation',
-            'tau_depression',
-            'tau_ltp',
-            'tau_ltd',
-            'a_ltp_minimum',
-            'a_ltd_minimum',
-            'max_conductance',
-            'reversal_potential',
-            'tau_postsynaptic_conductance',
-            'psg_waveform_duration',
-            'delay'
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            ('utilization', [int, float, Normal, Uniform]),
+            ('redistribution', [int, float, Normal, Uniform]),
+            ('last_prefire_time', [int, float, Normal, Uniform]),
+            ('last_postfire_time', [int, float, Normal, Uniform]),
+            ('tau_facilitation', [int, float, Normal, Uniform]),
+            ('tau_depression', [int, float, Normal, Uniform]),
+            ('tau_ltp', [int, float, Normal, Uniform]),
+            ('tau_ltd', [int, float, Normal, Uniform]),
+            ('a_ltp_minimum', [int, float, Normal, Uniform]),
+            ('a_ltd_minimum', [int, float, Normal, Uniform]),
+            ('max_conductance', [int, float, Normal, Uniform]),
+            ('reversal_potential', [int, float, Normal, Uniform]),
+            ('tau_postsynaptic_conductance', [int, float, Normal, Uniform]),
+            ('psg_waveform_duration', [int, float, Normal, Uniform]),
+            ('delay', [int, float, Normal, Uniform])
         ]
-        self.utilization = utilization
-        self.redistribution = redistribution
-        self.last_prefire_time = last_prefire_time
-        self.last_postfire_time = last_postfire_time
-        self.tau_facilitation = tau_facilitation
-        self.tau_depression = tau_depression
-        self.tau_ltp = tau_ltp
-        self.tau_ltd = tau_ltd
-        self.a_ltp_minimum = a_ltp_minimum
-        self.a_ltd_minimum = a_ltd_minimum
-        self.max_conductance = max_conductance
-        self.reversal_potential = reversal_potential
-        self.tau_postsynaptic_conductance = tau_postsynaptic_conductance
-        self.psg_waveform_duration = psg_waveform_duration
-        self.delay = delay
+        kwargs['synapse_type'] = _Synapse.NCS
+        _Synapse.__init__(self, kwargs)
 
 
 class _Stimulus(_Entity):
 
     RECTANGULAR_CURRENT = 'rectangular_current'
 
-    def __init__(self, stimulus_type, time_start, time_end, probability):
-        _Entity.__init__(self, entity_type=_Entity.STIMULUS)
+    def __init__(self, **kwargs):
+        self.parameter_list += [('stimulus_type', [str])]
         self.parameter_list += [
-            'time_start',
-            'time_end',
-            'probability'
+            ('time_start', [int, float, Normal, Uniform]),
+            ('time_end', [int, float, Normal, Uniform]),
+            ('probability', [int, float, Normal, Uniform])
         ]
-        self.stimulus_type = stimulus_type
-        self.time_start = time_start
-        self.time_end = time_end
-        self.probability = probability
+        kwargs['entity_type'] = _Entity.STIMULUS
+        _Entity.__init__(self, kwargs)
 
 
 class RectangularCurrentStimulus(_Stimulus):
 
-    def __init__(self, amplitude, width, frequency, time_start, time_end,
-                 probability):
-        _Stimulus.__init__(self, _Stimulus.RECTANGULAR_CURRENT, time_start,
-                           time_end, probability)
-        self.parameter_list += [
-            'amplitude',
-            'width',
-            'frequency',
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            ('amplitude', [int, float, Normal, Uniform]),
+            ('width', [int, float, Normal, Uniform]),
+            ('frequency', [int, float, Normal, Uniform]),
         ]
-        self.amplitude = amplitude
-        self.width = width
-        self.frequency = frequency
+        kwargs['stimulus_type'] = _Stimulus.RECTANGULAR_CURRENT
+        _Stimulus.__init__(self, kwargs)
 
 
 class Report(_Entity):
@@ -408,24 +412,17 @@ class Report(_Entity):
     FILE = 'file'
     SOCKET = 'socket'
 
-    def __init__(self, report_method, report_type, report_target, probability,
-                 frequency, time_start, time_end):
-        _Entity.__init__(self, entity_type=_Entity.REPORT)
+    def __init__(self, **kwargs):
         self.parameter_list += [
-            'report_method',
-            'report_type'
-            'report_target',
-            'probability',
-            'time_start',
-            'time_end'
+            ('report_method', [int, float, Normal, Uniform]),
+            ('report_type', [int, float, Normal, Uniform])
+            ('report_target', [int, float, Normal, Uniform]),
+            ('probability', [int, float, Normal, Uniform]),
+            ('time_start', [int, float, Normal, Uniform]),
+            ('time_end', [int, float, Normal, Uniform])
         ]
-        self.report_method = report_method
-        self.report_type = report_type
-        self.report_target = report_target
-        self.probability = probability
-        self.frequency = frequency
-        self.time_start = time_start
-        self.time_end = time_end
+        kwargs['entity_type'] = _Entity.REPORT
+        _Entity.__init__(self, kwargs)
 
 
 class _Neuron(_Entity):
@@ -434,16 +431,16 @@ class _Neuron(_Entity):
     NCS_NEURON = 'ncs_neuron'
     HH_NEURON = 'hh_neuron'
 
-    def __init__(self, neuron_type):
-        _Entity.__init__(self, entity_type=_Entity.NEURON)
-        self.neuron_type = neuron_type
+    def __init__(self, kwargs):
+        self.parameter_list += [('neuron_type', [str])]
+        kwargs['entity_type'] = _Entity.NEURON
+        _Entity.__init__(self, kwargs)
 
 
 class IzhNeuron(_Neuron):
 
-    def __init__(self, a, b, c, d, u, v, threshold):
-        _Neuron.__init__(self, _Neuron.IZH_NEURON)
-        self.parameter_list += [
+    def __init__(self, **kwargs):
+        self.parameter_list = [
             'a',
             'b',
             'c',
@@ -452,22 +449,13 @@ class IzhNeuron(_Neuron):
             'v',
             'threshold'
         ]
-        self.a = a
-        self.b = b
-        self.c = c
-        self.d = d
-        self.u = u
-        self.v = v
-        self.threshold = threshold
+        kwargs['neuron_type'] = _Neuron.IZH_NEURON
+        _Neuron.__init__(self, kwargs)
 
 
 class NCSNeuron(_Neuron):
 
-    def __init__(self, threshold, spikeshape, resting_potential, calcium,
-                 calcium_spike_increment, tau_calcium,
-                 leak_reversal_potential, leak_conductance, tau_membrane,
-                 r_membrane, channels):
-        _Neuron.__init__(self, _Neuron.NCS_NEURON)
+    def __init__(self, **kwargs):
         self.parameter_list += [
             'threshold',
             'spikeshape',
@@ -481,33 +469,21 @@ class NCSNeuron(_Neuron):
             'r_membrane',
             'channels'
         ]
-        self.threshold = threshold
-        self.spikeshape = spikeshape
-        self.resting_potential = resting_potential
-        self.calcium = calcium
-        self.calcium_spike_increment = calcium_spike_increment
-        self.tau_calcium = tau_calcium
-        self.leak_reversal_potential = leak_reversal_potential
-        self.leak_conductance = leak_conductance
-        self.tau_membrane = tau_membrane
-        self.r_membrane = r_membrane
-        self.channels = channels
+        kwargs['neuron_type'] = _Neuron.NCS_NEURON
+        _Neuron.__init__(self, kwargs)
 
 
 class HHNeuron(_Neuron):
 
-    def __init__(self, resting_potential, threshold, capacitance, channels):
-        _Neuron.__init__(self, _Neuron.HH_NEURON)
+    def __init__(self, **kwargs):
         self.parameter_list += [
             'resting_potential',
             'threshold',
             'capacitance',
             'channels'
         ]
-        self.resting_potential = resting_potential
-        self.threshold = threshold
-        self.capacitance = capacitance
-        self.channels = channels
+        kwargs['neuron_type'] = _Neuron.HH_NEURON
+        _Neuron.__init__(self, kwargs)
 
 
 class Group(_Entity):
@@ -521,4 +497,5 @@ class Group(_Entity):
             'synaptic_aliases',
             'connections'
         ]
+        kwargs['entity_type'] = _Entity.GROUP
         _Entity.__init__(self, kwargs)

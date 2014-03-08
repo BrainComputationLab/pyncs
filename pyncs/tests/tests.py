@@ -6,8 +6,7 @@ print har.to_dict()
 
 har = LIFVoltageGatedChannel(
     v_half=0.5,
-    r=0.5,
-    lolz=5.0
+    r=Normal(0.65, 0.1)
 )
 
 print har.to_dict()
