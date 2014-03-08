@@ -77,8 +77,6 @@ class Simulator(object):
                                    simulation""")
         # recurse through the top group and build the simulation json object
         entity_dicts = generate_entity_dicts(simulation.top_group)
-        # set the username
-        entity_dicts['meta'] = {'username': self.username}
         # which group is the top-level group
         entity_dicts['top_group'] = {"group_id": simulation.top_group['_id']}
         # dump the dictionary to a json string
@@ -235,7 +233,7 @@ class _Entity(object):
 
     def to_dict(self):
         # create the dictionary object
-        dictionary = {'parameters': {}}
+        dictionary = {'specification': {}}
         params = map(lambda x: x[0], self.parameter_list)
         meta = map(lambda x: x[0], self.metadata)
         # create the metadata parameters
@@ -414,12 +412,12 @@ class Report(_Entity):
 
     def __init__(self, **kwargs):
         self.parameter_list += [
-            ('report_method', [int, float, Normal, Uniform]),
-            ('report_type', [int, float, Normal, Uniform])
-            ('report_target', [int, float, Normal, Uniform]),
-            ('probability', [int, float, Normal, Uniform]),
-            ('time_start', [int, float, Normal, Uniform]),
-            ('time_end', [int, float, Normal, Uniform])
+            ('report_method', [str]),
+            ('report_type', [str])
+            ('report_target', [str]),
+            ('probability', [float]),
+            ('time_start', [int]),
+            ('time_end', [int])
         ]
         kwargs['entity_type'] = _Entity.REPORT
         _Entity.__init__(self, kwargs)
@@ -441,13 +439,13 @@ class IzhNeuron(_Neuron):
 
     def __init__(self, **kwargs):
         self.parameter_list = [
-            'a',
-            'b',
-            'c',
-            'd',
-            'u',
-            'v',
-            'threshold'
+            ('a', [int, float, Normal, Uniform]),
+            ('b', [int, float, Normal, Uniform]),
+            ('c', [int, float, Normal, Uniform]),
+            ('d', [int, float, Normal, Uniform]),
+            ('u', [int, float, Normal, Uniform]),
+            ('v', [int, float, Normal, Uniform]),
+            ('threshold', [int, float, Normal, Uniform])
         ]
         kwargs['neuron_type'] = _Neuron.IZH_NEURON
         _Neuron.__init__(self, kwargs)
@@ -457,45 +455,135 @@ class NCSNeuron(_Neuron):
 
     def __init__(self, **kwargs):
         self.parameter_list += [
-            'threshold',
-            'spikeshape',
-            'resting_potential',
-            'calcium',
-            'calcium_spike_increment',
-            'tau_calcium',
-            'leak_reversal_potential',
-            'leak_conductance',
-            'tau_membrane',
-            'r_membrane',
-            'channels'
+            ('threshold', [int, float, Normal, Uniform]),
+            ('spikeshape', [int, float, Normal, Uniform]),
+            ('resting_potential', [int, float, Normal, Uniform]),
+            ('calcium', [int, float, Normal, Uniform]),
+            ('calcium_spike_increment', [int, float, Normal, Uniform]),
+            ('tau_calcium', [int, float, Normal, Uniform]),
+            ('leak_reversal_potential', [int, float, Normal, Uniform]),
+            ('leak_conductance', [int, float, Normal, Uniform]),
+            ('tau_membrane', [int, float, Normal, Uniform]),
+            ('r_membrane', [int, float, Normal, Uniform]),
+            ('channels', [list])
         ]
         kwargs['neuron_type'] = _Neuron.NCS_NEURON
         _Neuron.__init__(self, kwargs)
+
+    def __setattr__(self, key, value):
+        _Entity.__setattr__(self, key, value)
+        if key is 'channels':
+            for idx, channel in enumerate(value):
+                if not issubclass(type(channel), _Channel):
+                    raise EntityError("Invalid channel at index %d" % idx)
 
 
 class HHNeuron(_Neuron):
 
     def __init__(self, **kwargs):
         self.parameter_list += [
-            'resting_potential',
-            'threshold',
-            'capacitance',
-            'channels'
+            ('resting_potential', [int, float, Normal, Uniform]),
+            ('threshold', [int, float, Normal, Uniform]),
+            ('capacitance', [int, float, Normal, Uniform]),
+            ('channels', [list])
         ]
         kwargs['neuron_type'] = _Neuron.HH_NEURON
         _Neuron.__init__(self, kwargs)
+
+    def __setattr__(self, key, value):
+        _Entity.__setattr__(self, key, value)
+        if key is 'channels':
+            for idx, channel in enumerate(value):
+                if not issubclass(type(channel), _Channel):
+                    raise EntityError("Invalid channel at index %d" % idx)
 
 
 class Group(_Entity):
 
     def __init__(self, **kwargs):
         self.parameter_list = [
-            'geometry',
-            'subgroups',
-            'neuron_groups',
-            'neuron_aliases',
-            'synaptic_aliases',
-            'connections'
+            ('geometry', [dict]),
+            ('subgroups', [list]),
+            ('neuron_groups', [list]),
+            ('neuron_aliases', [list]),
+            ('synaptic_aliases', [list]),
+            ('connections', [list])
         ]
         kwargs['entity_type'] = _Entity.GROUP
         _Entity.__init__(self, kwargs)
+
+    def __setattr__(self, key, value):
+        _Entity.__setattr__(self, key, value)
+        if key is 'geometry':
+            if 'width' not in value or 'height' not in value or 'depth' not in value:
+                raise EntityError("Invalid geomeetry dict, check documentation")
+        if key is 'subgroups':
+            for idx, d in enumerate(value):
+                if 'group' not in d or type(d['group_id']) is not Group:
+                    raise EntityError("Invalid group spec at list index %d" % idx)
+                if 'label' not in d or type(d['label']) is not str:
+                    raise EntityError("Invalid group spec at list index %d" % idx)
+                # Location is optional at this point
+                if 'location' in d:
+                    if type(d['location']) is not dict:
+                        raise EntityError("Invalid group spec at list index %d" % idx)
+                    if 'x' not in d['location']:
+                        raise EntityError("Invalid group spec at list index %d" % idx)
+                    if 'y' not in d['location']:
+                        raise EntityError("Invalid group spec at list index %d" % idx)
+                    if 'z' not in d['location']:
+                        raise EntityError("Invalid group spec at list index %d" % idx)
+        if key is 'neuron_groups':
+            for idx, d in enumerate(value):
+                if 'neuron' not in d or not issubclass(type(d['neuron']), _Neuron):
+                    raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                if 'label' not in d or type(d['label']) is not str:
+                    raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                if 'geometry' in d:
+                    if type(d['geometry']) is not dict:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                    if 'width' not in d['geometry']:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                    if 'height' not in d['geometry']:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                    if 'depth' not in d['geometry']:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                if 'location' in d:
+                    if type(d['location']) is not dict:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                    if 'x' not in d['location']:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                    if 'y' not in d['location']:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+                    if 'z' not in d['location']:
+                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
+        if key is 'neuron_aliases' or key is 'synaptic_aliases':
+            for idx, d in enumerate(value):
+                if 'alias' not in d or type(d['alias']) is not str:
+                    raise EntityError("Invalid alias spec at list index %d" % idx)
+                if 'labels' not in d and 'aliases' not in d:
+                    raise EntityError("Invalid alias spec at list index %d" % idx)
+                if 'labels' in d:
+                    if type(d['labels']) is not list:
+                        raise EntityError("Invalid alias spec at list index %d" % idx)
+                    for l in d['labels']:
+                        if type(l) is not str:
+                            raise EntityError("Invalid alias spec at list index %d" % idx)
+                if 'aliases' in d:
+                    if type(d['aliases']) is not list:
+                        raise EntityError("Invalid alias spec at list index %d" % idx)
+                    for l in d['aliases']:
+                        if type(l) is not str:
+                            raise EntityError("Invalid alias spec at list index %d" % idx)
+        if key is 'connections':
+            for idx, d in enumerate(value):
+                if 'presynaptic' not in d or type(d['presynaptic']) is not str:
+                    raise EntityError("Invalid connection spec at list index %d" % idx)
+                if 'postsynaptic' not in d or type(d['postsynaptic']) is not str:
+                    raise EntityError("Invalid connection spec at list index %d" % idx)
+                if 'probability' not in d or type(d['probability']) is not float:
+                    raise EntityError("Invalid connection spec at list index %d" % idx)
+                if 'synapse' not in d or not issubclass(type(d['synapse']), _Synapse):
+                    raise EntityError("Invalid connection spec at list index %d" % idx)
+                if 'recurrent' in d and type(d['recurrent']) is not bool:
+                    raise EntityError("Invalid connection spec at list index %d" % idx)
