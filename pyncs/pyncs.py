@@ -2,7 +2,6 @@ import requests
 import os
 import json
 import textwrap
-from urlparse import urlparse
 
 
 class AuthenticationError(Exception):
@@ -40,19 +39,25 @@ class Simulator(object):
     def __init__(self, host, port, username, password):
         self.host = host
         self.port = port
+        self.username = username
+        self.password = password
         self.is_authenticated = False
-        url = urlparse(host)
-        if not url.port:
-            url.port = port
-        self.url = url
+        self.url = 'http://' + self.host
 
     def authenticate(self):
-        self.url.path = "/login"
+        url = self.url
+        url = url + "/login"
         auth_payload = {
             'username': self.username,
             'password': self.password
         }
-        r = requests.post(self.url.get_url(), data=json.dumps(auth_payload))
+        # attempt to connect to server
+        try:
+            r = requests.post(url, data=json.dumps(auth_payload))
+        # if it doesn't work, alert the user
+        except requests.exceptions.ConnectionError:
+            raise AuthenticationError("Could not connect to authenticate")
+        # otherwise load the data
         res = json.loads(r.text)
         if 'token' not in res:
             raise AuthenticationError("Authentication Failed")
@@ -76,9 +81,9 @@ class Simulator(object):
                                    object before attempting to run a
                                    simulation""")
         # recurse through the top group and build the simulation json object
-        entity_dicts = generate_entity_dicts(simulation.top_group)
+        entity_dicts = self._generate_entity_dicts(simulation.top_group)
         # which group is the top-level group
-        entity_dicts['top_group'] = {"group_id": simulation.top_group['_id']}
+        entity_dicts['top_group'] = simulation.top_group._id
         # dump the dictionary to a json string
         sim_string = json.dumps(entity_dicts)
         # set the correct url path
@@ -94,66 +99,70 @@ class Simulator(object):
         else:
             return r.json()
 
-
-def generate_entity_dicts(self, model):
-    entity_dicts = {
-        'neuron_list': {},
-        'channel_list': {},
-        'report_list': {},
-        'stimuli_list': {},
-        'synapse_list': {},
-        'group_list': {},
-        'neuron_alias_list': {},
-        'synapse_alias_list': {}
-    }
-    subgroup_result_list = []
-    # check the current
-    if model._id not in entity_dicts['group_list']:
-        entity_dicts['group_list'][model['_id']] = model
-    # check/add neuron types and channels
-    for neuron_group in model.neuron_groups:
-        # if the neuron isn't in the neuron list yet
-        if neuron_group['neuron']._id not in entity_dicts['neuron_list']:
-            # add it to the list
-            entity_dicts['neuron_list'][neuron_group['neuron']._id] = \
-                neuron_group['neuron']
-            # check all of its channels
-            for channel in neuron_group['neuron']['channels']:
-                # if the channel isn't in the list, add it
-                if channel._id not in entity_dicts['channel_list']:
-                    entity_dicts['channel_list'][channel._id] = channel
-    for alias in model.neuron_aliases:
-        new_alias = alias.copy()
-        new_alias['group_id'] = model._id
-        # if the alias was already created, we have an error
-        if new_alias['alias'] in entity_dicts['neuron_alias_list']:
-            raise SimulationError("neuron alias already exists")
-        # add it to the dicts
-        else:
-            entity_dicts['neuron_alias_list'][new_alias['alias']] = new_alias
-    for alias in model.synapse_aliases:
-        new_alias = alias.copy()
-        new_alias['group_id'] = model._id
-        # if the alias was already created, we have an error
-        if new_alias['alias'] in entity_dicts['synapse_alias_list']:
-            raise SimulationError("synapse alias already exists")
-        # add it to the dicts
-        else:
-            entity_dicts['neuron_alias_list'][new_alias['alias']] = new_alias
-    # recursively traverse the subgroups of the model
-    for subgroup in model.subgroups:
-        # call this function on the current subgroup and get the dict back
-        res = subgroup_result_list.append(generate_entity_dicts(subgroup))
-    # look at all the submodels resulting dictionaries
-    for res in subgroup_result_list:
-        # loop over the entity categories from the result (eg. neuron_dict)
-        for entity_category, entity_category_dict in res:
-            # loop over the entities created in that category
-            for entity_id, entity_value in entity_category_dict:
-                # add the new entities to their corresponding dictionary
-                entity_dicts[entity_category][entity_id] = entity_value
-    # return the resulting entity dictionary
-    return entity_dicts
+    # TODO Make this less complicated, CC is too high
+    def _generate_entity_dicts(self, model):
+        entity_dicts = {
+            'neuron_list': {},
+            'channel_list': {},
+            'report_list': {},
+            'stimuli_list': {},
+            'synapse_list': {},
+            'group_list': {},
+            'neuron_alias_list': {},
+            'synapse_alias_list': {}
+        }
+        subgroup_result_list = []
+        # check the current
+        if model._id not in entity_dicts['group_list']:
+            entity_dicts['group_list'][model['_id']] = model
+        # check/add neuron types and channels
+        for neuron_group in model.neuron_groups:
+            # if the neuron isn't in the neuron list yet
+            if neuron_group['neuron']._id not in entity_dicts['neuron_list']:
+                # add it to the list
+                entity_dicts['neuron_list'][neuron_group['neuron']._id] = \
+                    neuron_group['neuron']
+                # check all of its channels
+                for channel in neuron_group['neuron']['channels']:
+                    # if the channel isn't in the list, add it
+                    if channel._id not in entity_dicts['channel_list']:
+                        entity_dicts['channel_list'][channel._id] = channel
+        for alias in model.neuron_aliases:
+            new_alias = alias.copy()
+            new_alias['group_id'] = model._id
+            # if the alias was already created, we have an error
+            if new_alias['alias'] in entity_dicts['neuron_alias_list']:
+                raise SimulationError("neuron alias already exists")
+            # add it to the dicts
+            else:
+                entity_dicts['neuron_alias_list'][new_alias['alias']] = \
+                    new_alias
+        for alias in model.synapse_aliases:
+            new_alias = alias.copy()
+            new_alias['group_id'] = model._id
+            # if the alias was already created, we have an error
+            if new_alias['alias'] in entity_dicts['synapse_alias_list']:
+                raise SimulationError("synapse alias already exists")
+            # add it to the dicts
+            else:
+                entity_dicts['neuron_alias_list'][new_alias['alias']] = \
+                    new_alias
+        # recursively traverse the subgroups of the model
+        for subgroup in model.subgroups:
+            # call this function on the current subgroup and get the dict back
+            res = subgroup_result_list.append(
+                self._generate_entity_dicts(subgroup)
+            )
+        # look at all the submodels resulting dictionaries
+        for res in subgroup_result_list:
+            # loop over the entity categories from the result (eg. neuron_dict)
+            for entity_category, entity_category_dict in res:
+                # loop over the entities created in that category
+                for entity_id, entity_value in entity_category_dict:
+                    # add the new entities to their corresponding dictionary
+                    entity_dicts[entity_category][entity_id] = entity_value
+        # return the resulting entity dictionary
+        return entity_dicts
 
 
 class Simulation(object):
@@ -177,6 +186,7 @@ class _Entity(object):
         self.metadata = [
             ('_id', [str]),
             ('entity_type', [str]),
+            ('entity_name', [str]),
             ('description', [str]),
             ('author', [str]),
             ('author_email', [str])
@@ -247,13 +257,19 @@ class _Entity(object):
         for param in params:
             try:
                 attr = getattr(self, param)
-                if type(attr) in [Normal, Uniform]:
-                    dictionary['parameters'][param] = attr.to_dict()
+                # These types of attributes need special processing
+                if type(attr) in [Normal, Uniform, NeuronGroup, Alias,
+                                  Location, Geometry, Connection]:
+                    dictionary['specification'][param] = attr.to_dict()
                 else:
-                    dictionary['parameters'][param] = attr
+                    dictionary['specification'][param] = attr
             except AttributeError:
                 continue
         return dictionary
+
+    def is_valid(self):
+        raise NotImplementedError("This method needs to be written in "
+                                  "subclasses")
 
 
 class Normal(object):
@@ -382,7 +398,7 @@ class _Stimulus(_Entity):
 
     RECTANGULAR_CURRENT = 'rectangular_current'
 
-    def __init__(self, **kwargs):
+    def __init__(self, kwargs):
         self.parameter_list += [('stimulus_type', [str])]
         self.parameter_list += [
             ('time_start', [int, float, Normal, Uniform]),
@@ -502,7 +518,7 @@ class Group(_Entity):
 
     def __init__(self, **kwargs):
         self.parameter_list = [
-            ('geometry', [dict]),
+            ('geometry', [Geometry]),
             ('subgroups', [list]),
             ('neuron_groups', [list]),
             ('neuron_aliases', [list]),
@@ -510,80 +526,153 @@ class Group(_Entity):
             ('connections', [list])
         ]
         kwargs['entity_type'] = _Entity.GROUP
+        if 'geometry' not in kwargs:
+            kwargs['geometry'] = Geometry()
+        _Entity.__init__(self, kwargs)
+
+    def to_dict(self):
+        d = _Entity.to_dict(self)
+        spec = {
+            'geometry': self.geometry.to_dict(),
+            'subgroups': [x.to_dict() for x in self.subgroups],
+            'neuron_groups': [x.to_dict() for x in self.neuron_groups],
+            'neuron_aliases': [x.to_dict() for x in self.neuron_aliases],
+            'synaptic_aliases': [x.to_dict() for x in self.synaptic_aliases],
+            'connections': [x.to_dict() for x in self.connections]
+        }
+        d['specification'] = spec
+        return d
+
+
+class SubGroup(_Entity):
+
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            ('group', [Group]),
+            ('label', [str]),
+            ('location', [Location])
+        ]
+        if 'location' not in kwargs:
+            kwargs['location'] = Location()
+        _Entity.__init__(self, kwargs)
+
+    def to_dict(self):
+        d = {
+            'group': self.group._id,
+            'label': self.label,
+            'location': self.location.to_dict()
+        }
+        return d
+
+
+class Geometry(object):
+
+    def __init__(self, width=0.0, height=0.0, depth=0.0):
+        self.width = width
+        self.height = height
+        self.depth = depth
+
+    def to_dict(self):
+        return {
+            'width': self.width,
+            'height': self.height,
+            'depth': self.depth
+        }
+
+
+class Location(object):
+
+    def __init__(self, x=0.0, y=0.0, z=0.0):
+        self.x = x
+        self.y = y
+        self.z = z
+
+    def to_dict(self):
+        return {'x': self.x, 'y': self.y, 'z': self.z}
+
+
+class NeuronGroup(_Entity):
+
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            ('neuron', [IzhNeuron, NCSNeuron, HHNeuron]),
+            ('count', [int]),
+            ('label', [str]),
+            ('geometry', [Geometry]),
+            ('location', [Location])
+        ]
+        if 'geometry' not in kwargs:
+            kwargs['geometry'] = Geometry()
+        if 'location' not in kwargs:
+            kwargs['location'] = Location()
+        _Entity.__init__(self, kwargs)
+
+    def to_dict(self):
+        return {
+            'neuron': self.neuron._id,
+            'count': self.count,
+            'label': self.label,
+            'geometry': self.geometry.to_dict(),
+            'location': self.location.to_dict()
+        }
+
+
+class Alias(_Entity):
+
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            ('alias', [str]),
+            ('labels', [list]),
+            ('aliases', [list])
+        ]
         _Entity.__init__(self, kwargs)
 
     def __setattr__(self, key, value):
         _Entity.__setattr__(self, key, value)
-        if key is 'geometry':
-            if 'width' not in value or 'height' not in value or 'depth' not in value:
-                raise EntityError("Invalid geomeetry dict, check documentation")
-        if key is 'subgroups':
-            for idx, d in enumerate(value):
-                if 'group' not in d or type(d['group_id']) is not Group:
-                    raise EntityError("Invalid group spec at list index %d" % idx)
-                if 'label' not in d or type(d['label']) is not str:
-                    raise EntityError("Invalid group spec at list index %d" % idx)
-                # Location is optional at this point
-                if 'location' in d:
-                    if type(d['location']) is not dict:
-                        raise EntityError("Invalid group spec at list index %d" % idx)
-                    if 'x' not in d['location']:
-                        raise EntityError("Invalid group spec at list index %d" % idx)
-                    if 'y' not in d['location']:
-                        raise EntityError("Invalid group spec at list index %d" % idx)
-                    if 'z' not in d['location']:
-                        raise EntityError("Invalid group spec at list index %d" % idx)
-        if key is 'neuron_groups':
-            for idx, d in enumerate(value):
-                if 'neuron' not in d or not issubclass(type(d['neuron']), _Neuron):
-                    raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                if 'label' not in d or type(d['label']) is not str:
-                    raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                if 'geometry' in d:
-                    if type(d['geometry']) is not dict:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                    if 'width' not in d['geometry']:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                    if 'height' not in d['geometry']:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                    if 'depth' not in d['geometry']:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                if 'location' in d:
-                    if type(d['location']) is not dict:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                    if 'x' not in d['location']:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                    if 'y' not in d['location']:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-                    if 'z' not in d['location']:
-                        raise EntityError("Invalid neuron_group spec at list index %d" % idx)
-        if key is 'neuron_aliases' or key is 'synaptic_aliases':
-            for idx, d in enumerate(value):
-                if 'alias' not in d or type(d['alias']) is not str:
-                    raise EntityError("Invalid alias spec at list index %d" % idx)
-                if 'labels' not in d and 'aliases' not in d:
-                    raise EntityError("Invalid alias spec at list index %d" % idx)
-                if 'labels' in d:
-                    if type(d['labels']) is not list:
-                        raise EntityError("Invalid alias spec at list index %d" % idx)
-                    for l in d['labels']:
-                        if type(l) is not str:
-                            raise EntityError("Invalid alias spec at list index %d" % idx)
-                if 'aliases' in d:
-                    if type(d['aliases']) is not list:
-                        raise EntityError("Invalid alias spec at list index %d" % idx)
-                    for l in d['aliases']:
-                        if type(l) is not str:
-                            raise EntityError("Invalid alias spec at list index %d" % idx)
-        if key is 'connections':
-            for idx, d in enumerate(value):
-                if 'presynaptic' not in d or type(d['presynaptic']) is not str:
-                    raise EntityError("Invalid connection spec at list index %d" % idx)
-                if 'postsynaptic' not in d or type(d['postsynaptic']) is not str:
-                    raise EntityError("Invalid connection spec at list index %d" % idx)
-                if 'probability' not in d or type(d['probability']) is not float:
-                    raise EntityError("Invalid connection spec at list index %d" % idx)
-                if 'synapse' not in d or not issubclass(type(d['synapse']), _Synapse):
-                    raise EntityError("Invalid connection spec at list index %d" % idx)
-                if 'recurrent' in d and type(d['recurrent']) is not bool:
-                    raise EntityError("Invalid connection spec at list index %d" % idx)
+        if key is 'labels':
+            for idx, l in value:
+                if type(l) is not str:
+                    raise EntityError("invalid label at index %d" % idx)
+        if key is 'aliases':
+            for idx, a in value:
+                if type(a) is not str:
+                    raise EntityError("invalid alias at index %d" % idx)
+
+    def to_dict(self):
+        d = {
+            'alias': self.alias,
+            'labels': self.labels,
+            'aliases': self.aliases
+        }
+        return d
+
+
+class Connection(_Entity):
+
+    def __init__(self, **kwargs):
+        self.parameter_list = [
+            ('presynaptic', [str]),
+            ('postsynaptic', [str]),
+            ('probability', [float]),
+            ('synapse', [FlatSynapse, NCSSynapse]),
+            ('recurrent', [bool])
+        ]
+        if 'recurrent' not in kwargs:
+            kwargs['recurrent'] = False
+        _Entity.__init__(self, kwargs)
+
+    def __setattr__(self, key, value):
+        _Entity.__setattr__(self, key, value)
+        if key is 'probability' and (value > 1 or not value > 0):
+            raise EntityError("probability must greater than 0 and less than "
+                              "or equal to one")
+
+    def to_dict(self):
+        d = {
+            'presynaptic': self.presynaptic,
+            'postsynaptic': self.postsynaptic,
+            'probability': self.probability,
+            'synapse': self.synapse._id,
+            'recurrent': self.recurrent
+        }
+        return d

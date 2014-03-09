@@ -1,18 +1,79 @@
-import unittest
-from pyncs import Normal, LIFVoltageGatedChannel
+#import unittest
+import json
+from pyncs import (Normal, IzhNeuron, Group, NeuronGroup, Geometry, Location,
+                   FlatSynapse, Connection, Simulation, Simulator,
+                   RectangularCurrentStimulus)
 
-har = Normal(1.0, 0.2)
-print har.to_dict()
-
-har = LIFVoltageGatedChannel(
-    v_half=0.5,
-    r=Normal(0.65, 0.1)
+izh = IzhNeuron(
+    a=0.5,
+    b=0.5,
+    c=0.5,
+    d=8.0,
+    u=-12.0,
+    v=Normal(-65.0, 0.5),
+    threshold=30.0
 )
 
-print har.to_dict()
+syn = FlatSynapse(
+    delay=10.0,
+    current=60.0
+)
 
+nrn_grp1 = NeuronGroup(
+    neuron=izh,
+    count=30,
+    label="izh1",
+    geometry=Geometry(),
+    location=Location()
+)
+nrn_grp2 = NeuronGroup(
+    neuron=izh,
+    count=50,
+    label="izh2",
+    geometry=Geometry(),
+    location=Location(),
+)
 
-class TestTest(unittest.TestCase):
+conn = Connection(
+    presynaptic="izh1",
+    postsynaptic="izh2",
+    probability=0.5,
+    synapse=syn
+)
 
-    def test_1(self):
-        pass
+grp = Group(
+    entity_name="lolerskates",
+    subgroups=[],
+    neuron_groups=[nrn_grp1, nrn_grp2],
+    neuron_aliases=[],
+    synaptic_aliases=[],
+    connections=[conn]
+)
+
+stim = RectangularCurrentStimulus(
+    amplitude=3.0,
+    width=2,
+    frequency=10
+)
+
+sim = Simulation(
+    top_group=grp,
+    stimuli=[stim],
+    reports=[]
+)
+
+server = Simulator(
+    host='localhost',
+    port=6060,
+    username='njordan',
+    password='123456'
+)
+
+server.authenticate()
+
+print json.dumps(grp.to_dict())
+
+#class TestTest(unittest.TestCase):
+#
+#    def test_1(self):
+#        pass
