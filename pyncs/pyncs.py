@@ -33,8 +33,8 @@ class EntityError(Exception):
 
 class Simulator(object):
 
-    STATUS_RUNNING = 'STATUS_RUNNING'
-    STATUS_IDLE = 'STATUS_IDLE'
+    STATUS_RUNNING = 'running'
+    STATUS_IDLE = 'idle'
 
     def __init__(self, host, port, username, password):
         self.host = host
@@ -81,9 +81,13 @@ class Simulator(object):
                                    object before attempting to run a
                                    simulation""")
         # recurse through the top group and build the simulation json object
-        entity_dicts = self._generate_entity_dicts(simulation.top_group)
+        entity_dicts = self._generate_entity_dicts(simulation.top_group,
+                                                   simulation.stimuli,
+                                                   simulation.reports)
+        # generate the proper transfer format
+        transfer_format = self._process_entity_dicts(entity_dicts)
         # which group is the top-level group
-        entity_dicts['top_group'] = simulation.top_group._id
+        transfer_format['top_group'] = simulation.top_group._id
         # dump the dictionary to a json string
         sim_string = json.dumps(entity_dicts)
         # set the correct url path
@@ -100,53 +104,41 @@ class Simulator(object):
             return r.json()
 
     # TODO Make this less complicated, CC is too high
-    def _generate_entity_dicts(self, model):
+    def _generate_entity_dicts(self, model, stimuli, reports):
         entity_dicts = {
-            'neuron_list': {},
-            'channel_list': {},
-            'report_list': {},
-            'stimuli_list': {},
-            'synapse_list': {},
-            'group_list': {},
-            'neuron_alias_list': {},
-            'synapse_alias_list': {}
+            'neurons': {},
+            'reports': {},
+            'stimuli': {},
+            'synapses': {},
+            'groups': {},
+            'neuron_aliases': {},
+            'synapse_aliases': {}
         }
         subgroup_result_list = []
         # check the current
-        if model._id not in entity_dicts['group_list']:
-            entity_dicts['group_list'][model['_id']] = model
+        if model._id not in entity_dicts['groups']:
+            entity_dicts['groups'][model._id] = model
         # check/add neuron types and channels
         for neuron_group in model.neuron_groups:
             # if the neuron isn't in the neuron list yet
-            if neuron_group['neuron']._id not in entity_dicts['neuron_list']:
+            if neuron_group.neuron._id not in entity_dicts['neurons']:
                 # add it to the list
-                entity_dicts['neuron_list'][neuron_group['neuron']._id] = \
-                    neuron_group['neuron']
-                # check all of its channels
-                for channel in neuron_group['neuron']['channels']:
-                    # if the channel isn't in the list, add it
-                    if channel._id not in entity_dicts['channel_list']:
-                        entity_dicts['channel_list'][channel._id] = channel
+                entity_dicts['neurons'][neuron_group.neuron._id] = \
+                    neuron_group.neuron
+        # TODO Implement
         for alias in model.neuron_aliases:
-            new_alias = alias.copy()
-            new_alias['group_id'] = model._id
-            # if the alias was already created, we have an error
-            if new_alias['alias'] in entity_dicts['neuron_alias_list']:
-                raise SimulationError("neuron alias already exists")
-            # add it to the dicts
-            else:
-                entity_dicts['neuron_alias_list'][new_alias['alias']] = \
-                    new_alias
+            pass
+        # TODO Implement
         for alias in model.synapse_aliases:
-            new_alias = alias.copy()
-            new_alias['group_id'] = model._id
-            # if the alias was already created, we have an error
-            if new_alias['alias'] in entity_dicts['synapse_alias_list']:
-                raise SimulationError("synapse alias already exists")
-            # add it to the dicts
-            else:
-                entity_dicts['neuron_alias_list'][new_alias['alias']] = \
-                    new_alias
+            pass
+        # check/add stimulus types
+        for stimulus in stimuli:
+            if stimulus._id not in entity_dicts['stimuli']:
+                entity_dicts['stimuli'][stimulus._id] = stimulus
+        # add reports
+        for report in reports:
+            if report._id not in entity_dicts['reports']:
+                entity_dicts['reports'][report._id] = report
         # recursively traverse the subgroups of the model
         for subgroup in model.subgroups:
             # call this function on the current subgroup and get the dict back
@@ -163,6 +155,23 @@ class Simulator(object):
                     entity_dicts[entity_category][entity_id] = entity_value
         # return the resulting entity dictionary
         return entity_dicts
+
+    def _process_entity_dicts(self, entity_dicts):
+        transfer_format = {
+            'neurons': [],
+            'reports': [],
+            'stimuli': [],
+            'synapses': [],
+            'groups': [],
+            'neuron_aliases': [],
+            'synapse_aliases': []
+        }
+        # add them to lists
+        for entity_type, entities in entity_dicts.iteritems():
+            for entity_id, entity in entities.iteritems():
+                transfer_format[entity_type].append(entity.to_dict())
+        return transfer_format
+
 
 
 class Simulation(object):
@@ -268,8 +277,12 @@ class _Entity(object):
         return dictionary
 
     def is_valid(self):
-        raise NotImplementedError("This method needs to be written in "
-                                  "subclasses")
+        # iterate over the parameters
+        for param in self.parameter_list:
+            # if its not specified, we're invalid
+            if param not in self.__dict__:
+                return False
+        return True
 
 
 class Normal(object):
@@ -280,7 +293,7 @@ class Normal(object):
         self.stdev = stdev
 
     def to_dict(self):
-        return {'mean': self.mean, 'stdev': self.stdev}
+        return {'type': 'normal', 'mean': self.mean, 'stdev': self.stdev}
 
 
 class Uniform(object):
@@ -291,7 +304,7 @@ class Uniform(object):
         self.max = max
 
     def to_dict(self):
-        return {'min': self.min, 'max': self.max}
+        return {'type': 'uniform', 'min': self.min, 'max': self.max}
 
 
 class _Channel(_Entity):
@@ -409,7 +422,7 @@ class _Stimulus(_Entity):
         _Entity.__init__(self, kwargs)
 
 
-class RectangularCurrentStimulus(_Stimulus):
+class RectCurrentStimulus(_Stimulus):
 
     def __init__(self, **kwargs):
         self.parameter_list = [
@@ -522,7 +535,7 @@ class Group(_Entity):
             ('subgroups', [list]),
             ('neuron_groups', [list]),
             ('neuron_aliases', [list]),
-            ('synaptic_aliases', [list]),
+            ('synapse_aliases', [list]),
             ('connections', [list])
         ]
         kwargs['entity_type'] = _Entity.GROUP
@@ -537,7 +550,7 @@ class Group(_Entity):
             'subgroups': [x.to_dict() for x in self.subgroups],
             'neuron_groups': [x.to_dict() for x in self.neuron_groups],
             'neuron_aliases': [x.to_dict() for x in self.neuron_aliases],
-            'synaptic_aliases': [x.to_dict() for x in self.synaptic_aliases],
+            'synaptic_aliases': [x.to_dict() for x in self.synapse_aliases],
             'connections': [x.to_dict() for x in self.connections]
         }
         d['specification'] = spec

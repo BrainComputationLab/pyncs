@@ -2,7 +2,7 @@
 import json
 from pyncs import (Normal, IzhNeuron, Group, NeuronGroup, Geometry, Location,
                    FlatSynapse, Connection, Simulation, Simulator,
-                   RectangularCurrentStimulus)
+                   RectCurrentStimulus)
 
 izh = IzhNeuron(
     a=0.5,
@@ -46,11 +46,11 @@ grp = Group(
     subgroups=[],
     neuron_groups=[nrn_grp1, nrn_grp2],
     neuron_aliases=[],
-    synaptic_aliases=[],
+    synapse_aliases=[],
     connections=[conn]
 )
 
-stim = RectangularCurrentStimulus(
+stim = RectCurrentStimulus(
     amplitude=3.0,
     width=2,
     frequency=10
@@ -69,9 +69,11 @@ server = Simulator(
     password='123456'
 )
 
-server.authenticate()
+d = server._generate_entity_dicts(sim.top_group, [stim], [])
+d = server._process_entity_dicts(d)
+print json.dumps(d)
 
-print json.dumps(grp.to_dict())
+#print json.dumps(grp.to_dict())
 
 #class TestTest(unittest.TestCase):
 #
