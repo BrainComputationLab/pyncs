@@ -85,11 +85,10 @@ class Simulator(object):
                                                    simulation.stimuli,
                                                    simulation.reports)
         # generate the proper transfer format
-        transfer_format = self._process_entity_dicts(entity_dicts)
-        # which group is the top-level group
-        transfer_format['top_group'] = simulation.top_group._id
+        transfer_format = self._process_entity_dicts(simulation.top_group,
+                                                     entity_dicts)
         # dump the dictionary to a json string
-        sim_string = json.dumps(entity_dicts)
+        sim_string = json.dumps(transfer_format)
         # set the correct url path
         self.url.path = '/sim'
         # add the auth token to the request headers
@@ -156,8 +155,9 @@ class Simulator(object):
         # return the resulting entity dictionary
         return entity_dicts
 
-    def _process_entity_dicts(self, entity_dicts):
+    def _process_entity_dicts(self, top_group, entity_dicts):
         transfer_format = {
+            'top_group': top_group._id,
             'neurons': [],
             'reports': [],
             'stimuli': [],
@@ -171,7 +171,6 @@ class Simulator(object):
             for entity_id, entity in entities.iteritems():
                 transfer_format[entity_type].append(entity.to_dict())
         return transfer_format
-
 
 
 class Simulation(object):

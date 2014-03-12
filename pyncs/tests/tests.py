@@ -10,7 +10,8 @@ izh = IzhNeuron(
     c=0.5,
     d=8.0,
     u=-12.0,
-    v=Normal(-65.0, 0.5),
+    #v=Normal(-65.0, 0.5),
+    v=30.0,
     threshold=30.0
 )
 
@@ -53,7 +54,10 @@ grp = Group(
 stim = RectCurrentStimulus(
     amplitude=3.0,
     width=2,
-    frequency=10
+    frequency=10,
+    probability=0.6,
+    time_start=0,
+    time_end=1
 )
 
 sim = Simulation(
@@ -70,7 +74,7 @@ server = Simulator(
 )
 
 d = server._generate_entity_dicts(sim.top_group, [stim], [])
-d = server._process_entity_dicts(d)
+d = server._process_entity_dicts(sim.top_group, d)
 print json.dumps(d)
 
 #print json.dumps(grp.to_dict())
