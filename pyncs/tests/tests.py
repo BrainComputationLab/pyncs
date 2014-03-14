@@ -1,5 +1,5 @@
 #import unittest
-import json
+#import json
 from pyncs import (Normal, IzhNeuron, Group, NeuronGroup, Geometry, Location,
                    FlatSynapse, Connection, Simulation, Simulator,
                    RectCurrentStimulus)
@@ -10,8 +10,8 @@ izh = IzhNeuron(
     c=0.5,
     d=8.0,
     u=-12.0,
-    #v=Normal(-65.0, 0.5),
-    v=30.0,
+    v=Normal(-65.0, 0.5),
+    #v=30.0,
     threshold=30.0
 )
 
@@ -68,14 +68,22 @@ sim = Simulation(
 
 server = Simulator(
     host='localhost',
-    port=6060,
-    username='njordan',
+    port=8000,
+    username='bob',
     password='123456'
 )
 
-d = server._generate_entity_dicts(sim.top_group, [stim], [])
-d = server._process_entity_dicts(sim.top_group, d)
-print json.dumps(d)
+#d = server._generate_entity_dicts(sim.top_group, [stim], [])
+#d = server._process_entity_dicts(sim.top_group, d)
+#print json.dumps(d)
+
+print "Authenticating with server"
+server.authenticate()
+print "Getting server status"
+print server.get_status()
+print "Run mock sim"
+print server.run(sim)
+
 
 #print json.dumps(grp.to_dict())
 

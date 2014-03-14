@@ -42,11 +42,10 @@ class Simulator(object):
         self.username = username
         self.password = password
         self.is_authenticated = False
-        self.url = 'http://' + self.host
+        self.url = 'http://' + self.host + ':' + str(port) + '/ncs/api'
 
     def authenticate(self):
-        url = self.url
-        url = url + "/login"
+        url = self.url + '/login'
         auth_payload = {
             'username': self.username,
             'password': self.password
@@ -63,23 +62,31 @@ class Simulator(object):
             raise AuthenticationError("Authentication Failed")
         else:
             self.token = res['token']
+            self.is_authenticated = True
 
     def get_status(self):
-        self.url.path = "/sim"
-        r = requests.get(self.url.get_url())
+        if not self.is_authenticated:
+            return SimulationError("Not authenticated, authenticate by "
+                                   "calling the authenticate() function on "
+                                   "this object before attempting to run a "
+                                   "simulation")
+        url = self.url + "/sim"
+        # add the auth token to the request headers
+        headers = {'token': self.token}
+        r = requests.get(url, headers=headers)
         res = json.loads(r.text)
-        if res['status'] is 'idle':
+        if res['status'] == 'idle':
             return Simulator.STATUS_IDLE
-        if res['status'] is 'running':
+        if res['status'] == 'running':
             return Simulator.STATUS_RUNNING
 
     def run(self, simulation):
         # if they haven't authenticated throw an error
-        if not self.token:
-            return SimulationError("""Not authenticated, authenticate by
-                                   calling the authenticate() function on this
-                                   object before attempting to run a
-                                   simulation""")
+        if not self.is_authenticated:
+            return SimulationError("Not authenticated, authenticate by "
+                                   "calling the authenticate() function on "
+                                   "this object before attempting to run a "
+                                   "simulation")
         # recurse through the top group and build the simulation json object
         entity_dicts = self._generate_entity_dicts(simulation.top_group,
                                                    simulation.stimuli,
@@ -90,11 +97,11 @@ class Simulator(object):
         # dump the dictionary to a json string
         sim_string = json.dumps(transfer_format)
         # set the correct url path
-        self.url.path = '/sim'
+        url = self.url + '/sim'
         # add the auth token to the request headers
         headers = {'token': self.token}
         # send the sim request
-        r = requests.post(self.url.get_url(), data=sim_string, headers=headers)
+        r = requests.post(url, data=sim_string, headers=headers)
         # if its not successful raise an exception
         if r.status_code is not 200:
             raise SimulationError(r.json()['message'])
