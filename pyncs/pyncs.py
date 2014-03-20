@@ -422,7 +422,8 @@ class _Stimulus(_Entity):
         self.parameter_list += [
             ('time_start', [int, float, Normal, Uniform]),
             ('time_end', [int, float, Normal, Uniform]),
-            ('probability', [int, float, Normal, Uniform])
+            ('probability', [int, float, Normal, Uniform]),
+            ('destinations', [list])
         ]
         kwargs['entity_type'] = _Entity.STIMULUS
         _Entity.__init__(self, kwargs)

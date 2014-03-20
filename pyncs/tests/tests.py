@@ -57,7 +57,8 @@ stim = RectCurrentStimulus(
     frequency=10,
     probability=0.6,
     time_start=0,
-    time_end=1
+    time_end=1,
+    destinations=["lolerskates:izh1"]
 )
 
 sim = Simulation(
