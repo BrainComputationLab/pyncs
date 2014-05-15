@@ -43,6 +43,7 @@ class Simulator(object):
         self.password = password
         self.is_authenticated = False
         self.url = 'http://' + self.host + ':' + str(port) + '/ncs/api'
+        self.authenticate()
 
     def authenticate(self):
         url = self.url + '/login'
@@ -443,17 +444,20 @@ class RectCurrentStimulus(_Stimulus):
 
 class Report(_Entity):
 
-    FILE = 'file'
-    SOCKET = 'socket'
+    METHOD_FILE = 'file'
+    METHOD_SOCKET = 'socket'
+
+    TYPE_NEURON = 'neuron'
+    TYPE_SYNAPSE = 'synapse'
 
     def __init__(self, **kwargs):
-        self.parameter_list += [
+        self.parameter_list = [
             ('report_method', [str]),
-            ('report_type', [str])
-            ('report_target', [str]),
+            ('report_type', [str]),
+            ('report_target', [list]),
             ('probability', [float]),
-            ('time_start', [int]),
-            ('time_end', [int])
+            ('time_start', [float]),
+            ('time_end', [float])
         ]
         kwargs['entity_type'] = _Entity.REPORT
         _Entity.__init__(self, kwargs)

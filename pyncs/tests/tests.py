@@ -1,7 +1,7 @@
 #import unittest
 #import json
 from pyncs import (Normal, IzhNeuron, Group, NeuronGroup, Geometry, Location,
-                   FlatSynapse, Connection, Simulation, Simulator,
+                   FlatSynapse, Connection, Simulation, Simulator, Report,
                    RectCurrentStimulus)
 
 izh = IzhNeuron(
@@ -61,10 +61,19 @@ stim = RectCurrentStimulus(
     destinations=["lolerskates:izh1"]
 )
 
+rpt = Report(
+    report_method=Report.METHOD_FILE,
+    report_type=Report.TYPE_NEURON,
+    report_target=[nrn_grp1],
+    probability=0.5,
+    time_start=0.0,
+    time_end=1.0
+)
+
 sim = Simulation(
     top_group=grp,
     stimuli=[stim],
-    reports=[]
+    reports=[rpt]
 )
 
 server = Simulator(
@@ -78,8 +87,6 @@ server = Simulator(
 #d = server._process_entity_dicts(sim.top_group, d)
 #print json.dumps(d)
 
-print "Authenticating with server"
-server.authenticate()
 print "Getting server status"
 print server.get_status()
 print "Run mock sim"
